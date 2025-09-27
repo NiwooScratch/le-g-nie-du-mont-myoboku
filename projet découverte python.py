@@ -7,6 +7,44 @@ print(os.listdir())
 # Initialisation de pygame
 pygame.init()
 
+# Ajout des images pour le portail, loups et araignées
+porte_img = pygame.image.load('porte_animale.png')
+loup_img = pygame.image.load('loup.png')
+araignee_img = pygame.image.load('arraigné.png')
+
+# Définition des mondes
+MONDE_INITIAL = "monde_initial"
+MONDE_ANIMALE = "monde_animale"
+monde = MONDE_INITIAL
+
+# propriétés de chaque monde ---
+def reset_map(monde):
+    global arbres, pierres, ors, temps_spawn_arbre, temps_spawn_pierre, temps_spawn_or, loups, araignees, temps_spawn_loup, temps_spawn_araignee
+    arbres = []
+    pierres = []
+    ors = []
+    temps_spawn_arbre = time.time()
+    temps_spawn_pierre = time.time()
+    temps_spawn_or = time.time()
+    if monde == MONDE_ANIMALE:
+        loups = []
+        araignees = []
+        temps_spawn_loup = time.time()
+        temps_spawn_araignee = time.time()
+    else:
+        loups = []
+        araignees = []
+
+DIRECTIONS = [
+    (0, -1),   # haut
+    (0, 1),    # bas
+    (-1, 0),   # gauche
+    (1, 0)     # droite
+]
+
+def random_direction():
+    return random.choice(DIRECTIONS)
+
 scroll_offset = 0
 nb_affichees = 6  # nombre de ressources visibles dans le menu
 
@@ -67,6 +105,15 @@ pierres = []
 temps_spawn_pierre = time.time()
 ors = []
 temps_spawn_or = time.time()
+
+#  variables pour les monstres ---
+loups = []
+araignees = []
+temps_spawn_loup = time.time()
+temps_spawn_araignee = time.time()
+
+# Position du portail
+porte_x, porte_y =  60, HAUTEUR//2 
 
 # Variables pour le menu
 menu_ouvert = False
@@ -155,7 +202,18 @@ while en_cours:
 		direction = 'up'
 	elif touches[pygame.K_DOWN]:
 		y += vitesse
+
+
 		direction = 'down'
+	# gestion du portail (changement de monde)
+	if (x - porte_x)**2 + (y - porte_y)**2 < (rayon + 30)**2:
+		if monde == MONDE_INITIAL:
+			monde = MONDE_ANIMALE
+		else:
+			monde = MONDE_INITIAL
+		x, y = LARGEUR // 2, HAUTEUR // 2
+		reset_map(monde)
+		time.sleep(0.2)  # évite de repasser instantanément le portail
 
 
     # gestion spawn arbres
@@ -173,6 +231,58 @@ while en_cours:
 	if (time.time() - temps_spawn_or > 30) and (len(ors) < 1):
 		temps_spawn_or = time.time()
 		ors.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), None])
+
+	# Gestion des monstres uniquement dans le monde animal 
+	if monde == MONDE_ANIMALE:
+        # Spawn loups
+		if (time.time() - temps_spawn_loup > 20) and (len(loups) < 3):
+			temps_spawn_loup = time.time()
+			dir_x, dir_y = random_direction()
+			loups.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time()])
+
+        # Spawn araignées
+		if (time.time() - temps_spawn_araignee > 20) and (len(araignees) < 3):
+			temps_spawn_araignee = time.time()
+			dir_x, dir_y = random_direction()
+			araignees.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time()])
+
+        # Déplacement aléatoire des loups
+		for loup in loups:
+			dist = ((x - loup[0])**2 + (y - loup[1])**2)**0.5
+			if dist < 100:
+				dx = x - loup[0]
+				dy = y - loup[1]
+				norm = max(1, (dx**2 + dy**2)**0.5)
+				loup[0] += int(3 * dx / norm)
+				loup[1] += int(3 * dy / norm)
+			else:
+                # Change direction toutes les 5 secondes
+				if time.time() - loup[4] > 5:
+					loup[2], loup[3] = random_direction()
+					loup[4] = time.time()
+				loup[0] += loup[2] * 0.07
+				loup[1] += loup[3] * 0.07
+			loup[0] = max(0, min(LARGEUR, loup[0]))
+			loup[1] = max(0, min(HAUTEUR, loup[1]))
+
+
+        # Déplacement aléatoire des araignées
+		for araignee in araignees:
+			dist = ((x - araignee[0])**2 + (y - araignee[1])**2)**0.5
+			if dist < 100:
+				dx = x - araignee[0]
+				dy = y - araignee[1]
+				norm = max(1, (dx**2 + dy**2)**0.5)
+				araignee[0] += int(3 * dx / norm)
+				araignee[1] += int(3 * dy / norm)
+			else:
+				if time.time() - araignee[4] > 5:
+					araignee[2], araignee[3] = random_direction()
+					araignee[4] = time.time()
+				araignee[0] += araignee[2] * 0.07
+				araignee[1] += araignee[3] * 0.07
+			araignee[0] = max(0, min(LARGEUR, araignee[0]))
+			araignee[1] = max(0, min(HAUTEUR, araignee[1]))
 		
 	# Gestion bucheronnage
 	indices_a_supprimer = []
@@ -245,6 +355,16 @@ while en_cours:
 	for oritem in ors:
 		xo, yo, _ = oritem
 		fenetre.blit(or_img, (xo - or_img.get_width()//2, yo - or_img.get_height()//2))
+	
+	# Dessin du portail
+	fenetre.blit(porte_img, (porte_x - porte_img.get_width()//2, porte_y - porte_img.get_height()//2))
+
+    # Dessin des monstres si monde animal
+	if monde == MONDE_ANIMALE:
+		for loup in loups:
+			fenetre.blit(loup_img, (loup[0] - loup_img.get_width()//2, loup[1] - loup_img.get_height()//2))
+		for araignee in araignees:
+			fenetre.blit(araignee_img, (araignee[0] - araignee_img.get_width()//2, araignee[1] - araignee_img.get_height()//2))
 
 	# Animation du personnage
 	frame_timer += 1
@@ -343,6 +463,8 @@ while en_cours:
 
 pygame.quit()
 
-#test pour verifier si ca marche
+
+
+
 
 
