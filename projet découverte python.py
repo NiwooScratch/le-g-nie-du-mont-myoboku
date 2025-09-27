@@ -98,7 +98,15 @@ couleurs_ressources = {
     'stick_pierre': (80, 80, 80),
     'epee_pierre': (120, 120, 120),
     'epee_or': (255, 223, 0)
-}# Chaque arbre/pierre/or est un tuple (x, y, debut_collecte)
+}
+
+# variables de combat
+pv_joueur = 100
+dernier_degats_loup = 0
+dernier_degats_araignee = 0
+
+
+# Chaque arbre/pierre/or est un tuple (x, y, debut_collecte)
 arbres = []
 temps_spawn_arbre = time.time()
 pierres = []
@@ -123,6 +131,18 @@ rect_menu = pygame.Rect(LARGEUR//2 - 200, HAUTEUR//2 - 150, 400, 300)  # menu ce
 ressource_drag = None
 drag_offset = (0, 0)
 matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+
+def degats_joueur():
+    if inventaire['epee_or'] > 0:
+        return 10
+    elif inventaire['epee_pierre'] > 0:
+        return 5
+    elif inventaire['stick_pierre'] > 0:
+        return 2
+    elif inventaire['stick'] > 0:
+        return 1
+    else:
+        return 0
 
 # Boucle principale
 en_cours = True
@@ -238,17 +258,33 @@ while en_cours:
 		if (time.time() - temps_spawn_loup > 20) and (len(loups) < 3):
 			temps_spawn_loup = time.time()
 			dir_x, dir_y = random_direction()
-			loups.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time()])
+			loups.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time(), 30, 0])
 
         # Spawn araignées
+		# Araignées : [x, y, dir_x, dir_y, last_dir_change, pv, dernier_degats]
 		if (time.time() - temps_spawn_araignee > 20) and (len(araignees) < 3):
 			temps_spawn_araignee = time.time()
 			dir_x, dir_y = random_direction()
-			araignees.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time()])
+			araignees.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time(), 20, 0])
 
         # Déplacement aléatoire des loups
-		for loup in loups:
+		for loup in loups[:]:
 			dist = ((x - loup[0])**2 + (y - loup[1])**2)**0.5
+			# Dégâts au joueur
+			if dist < rayon + 20:
+				if time.time() - loup[6] > 1:
+					pv_joueur -= 3
+					loup[6] = time.time()
+			# Dégâts au loup si contact et joueur a une arme
+			if dist < rayon + 20 and degats_joueur() > 0:
+				if time.time() - dernier_degats_loup > 1:
+					loup[5] -= degats_joueur()
+					dernier_degats_loup = time.time()
+			# Mort du loup
+			if loup[5] <= 0:
+				loups.remove(loup)
+				continue
+			# Déplacement
 			if dist < 100:
 				dx = x - loup[0]
 				dy = y - loup[1]
@@ -256,7 +292,6 @@ while en_cours:
 				loup[0] += int(3 * dx / norm)
 				loup[1] += int(3 * dy / norm)
 			else:
-                # Change direction toutes les 5 secondes
 				if time.time() - loup[4] > 5:
 					loup[2], loup[3] = random_direction()
 					loup[4] = time.time()
@@ -266,15 +301,30 @@ while en_cours:
 			loup[1] = max(0, min(HAUTEUR, loup[1]))
 
 
-        # Déplacement aléatoire des araignées
-		for araignee in araignees:
+        # --- Combat et dégâts des araignées ---
+		for araignee in araignees[:]:
 			dist = ((x - araignee[0])**2 + (y - araignee[1])**2)**0.5
+			# Dégâts au joueur
+			if dist < rayon + 20:
+				if time.time() - araignee[6] > 1:
+					pv_joueur -= 1
+					araignee[6] = time.time()
+			# Dégâts à l'araignée si contact et joueur a une arme
+			if dist < rayon + 20 and degats_joueur() > 0:
+				if time.time() - dernier_degats_araignee > 1:
+					araignee[5] -= degats_joueur()
+					dernier_degats_araignee = time.time()
+			# Mort de l'araignée
+			if araignee[5] <= 0:
+				araignees.remove(araignee)
+				continue
+			# Déplacement
 			if dist < 100:
 				dx = x - araignee[0]
 				dy = y - araignee[1]
 				norm = max(1, (dx**2 + dy**2)**0.5)
 				araignee[0] += int(3 * dx / norm)
-				araignee[1] += int(3 * dy / norm)
+				araignee[1] += int(3* dy / norm)
 			else:
 				if time.time() - araignee[4] > 5:
 					araignee[2], araignee[3] = random_direction()
@@ -379,6 +429,18 @@ while en_cours:
 	texte_inv = font.render("Inv.", True, (0, 0, 0))
 	fenetre.blit(texte_inv, (rect_inventaire.x + 5, rect_inventaire.y + 15))
 
+	# --- Affichage de la barre de PV du joueur ---
+	bar_x = rect_inventaire.x + rect_inventaire.width + 20
+	bar_y = rect_inventaire.y + 10
+	bar_largeur = 100
+	bar_hauteur = 20
+	pygame.draw.rect(fenetre, (180, 0, 0), (bar_x, bar_y, bar_largeur, bar_hauteur))  # fond rouge
+	pv_largeur = int(bar_largeur * pv_joueur / 100)
+	pygame.draw.rect(fenetre, (0, 200, 0), (bar_x, bar_y, pv_largeur, bar_hauteur))   # barre verte
+	font_pv = pygame.font.Font(None, 22)
+	txt_pv = font_pv.render(f"{pv_joueur}/100 PV", True, (0, 0, 0))
+	fenetre.blit(txt_pv, (bar_x + 10, bar_y + 2))
+
 	# Affichage du menu central si ouvert
 	if menu_ouvert:
 		pygame.draw.rect(fenetre, (220, 220, 220), rect_menu)
@@ -462,6 +524,7 @@ while en_cours:
 	pygame.display.flip()
 
 pygame.quit()
+
 
 
 
