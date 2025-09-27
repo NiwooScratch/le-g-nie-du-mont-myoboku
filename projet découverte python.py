@@ -343,3 +343,6 @@ while en_cours:
 
 pygame.quit()
 
+#test pour verifier si ca marche
+
+
