@@ -7,6 +7,44 @@ print(os.listdir())
 # Initialisation de pygame
 pygame.init()
 
+# Ajout des images pour le portail, loups et araignées
+porte_img = pygame.image.load('porte_animale.png')
+loup_img = pygame.image.load('loup.png')
+araignee_img = pygame.image.load('arraigné.png')
+
+# Définition des mondes
+MONDE_INITIAL = "monde_initial"
+MONDE_ANIMALE = "monde_animale"
+monde = MONDE_INITIAL
+
+# propriétés de chaque monde ---
+def reset_map(monde):
+    global arbres, pierres, ors, temps_spawn_arbre, temps_spawn_pierre, temps_spawn_or, loups, araignees, temps_spawn_loup, temps_spawn_araignee
+    arbres = []
+    pierres = []
+    ors = []
+    temps_spawn_arbre = time.time()
+    temps_spawn_pierre = time.time()
+    temps_spawn_or = time.time()
+    if monde == MONDE_ANIMALE:
+        loups = []
+        araignees = []
+        temps_spawn_loup = time.time()
+        temps_spawn_araignee = time.time()
+    else:
+        loups = []
+        araignees = []
+
+DIRECTIONS = [
+    (0, -1),   # haut
+    (0, 1),    # bas
+    (-1, 0),   # gauche
+    (1, 0)     # droite
+]
+
+def random_direction():
+    return random.choice(DIRECTIONS)
+
 scroll_offset = 0
 nb_affichees = 6  # nombre de ressources visibles dans le menu
 
@@ -19,6 +57,10 @@ pygame.display.set_caption("Jeu de la boule 2D")
 BLANC = (255, 255, 255)
 ROUGE = (255, 0, 0)
 VERT = (0, 255, 0)
+
+arme_distance = None  # 'arc' si sélectionné, sinon None
+trait_visee = False
+pos_visee = (0, 0)
 
 # Position et rayon de la boule
 arbres = []
@@ -40,33 +82,60 @@ frame_timer = 0
 vitesse = 1 
 # Inventaire sous forme de dictionnaire
 inventaire = {
-    'bois': 0,
-    'pierre': 0,
-    'or': 0,
-    'stick': 0,
-    'pioche_bois': 0,
-    'pioche_pierre': 0,
-    'stick_pierre': 0,
-    'epee_pierre': 0,
-    'epee_or': 0
+	'bois': 0,
+	'pierre': 0,
+	'or': 0,
+	'stick': 0,
+	'pioche_bois': 0,
+	'pioche_pierre': 0,
+	'stick_pierre': 0,
+	'epee_pierre': 0,
+	'epee_or': 0,
+	'viande': 0,
+	'fil': 0 ,
+	'arc': 0,
+	'fleche_pierre': 0,
+    'fleche_or': 0
 }
 couleurs_ressources = {
-    'bois': (139, 69, 19),
-    'pierre': (128, 128, 128),
-    'or': (255, 215, 0),
-    'stick': (160, 82, 45),
-    'pioche_bois': (205, 133, 63),
-    'pioche_pierre': (100, 100, 100),
-    'stick_pierre': (80, 80, 80),
-    'epee_pierre': (120, 120, 120),
-    'epee_or': (255, 223, 0)
-}# Chaque arbre/pierre/or est un tuple (x, y, debut_collecte)
+	'bois': (139, 69, 19),
+	'pierre': (128, 128, 128),
+	'or': (255, 215, 0),
+	'stick': (160, 82, 45),
+	'pioche_bois': (205, 133, 63),
+	'pioche_pierre': (100, 100, 100),
+	'stick_pierre': (80, 80, 80),
+	'epee_pierre': (120, 120, 120),
+	'epee_or': (255, 223, 0),
+	'viande': (200, 100, 80),
+	'fil': (220, 220, 220),
+	'arc': (120, 80, 40),
+    'fleche_pierre': (100, 100, 100),
+    'fleche_or': (255, 215, 0)
+}
+
+# variables de combat
+pv_joueur = 100
+dernier_degats_loup = 0
+dernier_degats_araignee = 0
+
+
+# Chaque arbre/pierre/or est un tuple (x, y, debut_collecte)
 arbres = []
 temps_spawn_arbre = time.time()
 pierres = []
 temps_spawn_pierre = time.time()
 ors = []
 temps_spawn_or = time.time()
+
+#  variables pour les monstres ---
+loups = []
+araignees = []
+temps_spawn_loup = time.time()
+temps_spawn_araignee = time.time()
+
+# Position du portail
+porte_x, porte_y =  60, HAUTEUR//2 
 
 # Variables pour le menu
 menu_ouvert = False
@@ -76,6 +145,18 @@ rect_menu = pygame.Rect(LARGEUR//2 - 200, HAUTEUR//2 - 150, 400, 300)  # menu ce
 ressource_drag = None
 drag_offset = (0, 0)
 matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+
+def degats_joueur():
+    if inventaire['epee_or'] > 0:
+        return 10
+    elif inventaire['epee_pierre'] > 0:
+        return 5
+    elif inventaire['stick_pierre'] > 0:
+        return 2
+    elif inventaire['stick'] > 0:
+        return 1
+    else:
+        return 0
 
 # Boucle principale
 en_cours = True
@@ -155,7 +236,18 @@ while en_cours:
 		direction = 'up'
 	elif touches[pygame.K_DOWN]:
 		y += vitesse
+
+
 		direction = 'down'
+	# gestion du portail (changement de monde)
+	if (x - porte_x)**2 + (y - porte_y)**2 < (rayon + 30)**2:
+		if monde == MONDE_INITIAL:
+			monde = MONDE_ANIMALE
+		else:
+			monde = MONDE_INITIAL
+		x, y = LARGEUR // 2, HAUTEUR // 2
+		reset_map(monde)
+		time.sleep(0.2)  # évite de repasser instantanément le portail
 
 
     # gestion spawn arbres
@@ -173,6 +265,90 @@ while en_cours:
 	if (time.time() - temps_spawn_or > 30) and (len(ors) < 1):
 		temps_spawn_or = time.time()
 		ors.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), None])
+
+	# Gestion des monstres uniquement dans le monde animal 
+	if monde == MONDE_ANIMALE:
+        # Spawn loups
+		if (time.time() - temps_spawn_loup > 20) and (len(loups) < 3):
+			temps_spawn_loup = time.time()
+			dir_x, dir_y = random_direction()
+			loups.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time(), 30, 0])
+
+        # Spawn araignées
+		# Araignées : [x, y, dir_x, dir_y, last_dir_change, pv, dernier_degats]
+		if (time.time() - temps_spawn_araignee > 20) and (len(araignees) < 3):
+			temps_spawn_araignee = time.time()
+			dir_x, dir_y = random_direction()
+			araignees.append([random.randint(0, LARGEUR), random.randint(0, HAUTEUR), dir_x, dir_y, time.time(), 20, 0])
+
+        # Déplacement aléatoire des loups
+		for loup in loups[:]:
+			dist = ((x - loup[0])**2 + (y - loup[1])**2)**0.5
+			# Dégâts au joueur
+			if dist < rayon + 20:
+				if time.time() - loup[6] > 1:
+					pv_joueur -= 3
+					loup[6] = time.time()
+			# Dégâts au loup si contact et joueur a une arme
+			if dist < rayon + 20 and degats_joueur() > 0:
+				if time.time() - dernier_degats_loup > 1:
+					loup[5] -= degats_joueur()
+					dernier_degats_loup = time.time()
+			# Mort du loup
+			if loup[5] <= 0:
+				loups.remove(loup)
+				inventaire['viande'] += 1  # loot viande
+				continue
+			# Déplacement
+			if dist < 100:
+				dx = x - loup[0]
+				dy = y - loup[1]
+				norm = max(1, (dx**2 + dy**2)**0.5)
+				loup[0] += int(3 * dx / norm)
+				loup[1] += int(3 * dy / norm)
+			else:
+				if time.time() - loup[4] > 5:
+					loup[2], loup[3] = random_direction()
+					loup[4] = time.time()
+				loup[0] += loup[2] * 0.07
+				loup[1] += loup[3] * 0.07
+			loup[0] = max(0, min(LARGEUR, loup[0]))
+			loup[1] = max(0, min(HAUTEUR, loup[1]))
+
+
+        # --- Combat et dégâts des araignées ---
+		for araignee in araignees[:]:
+			dist = ((x - araignee[0])**2 + (y - araignee[1])**2)**0.5
+			# Dégâts au joueur
+			if dist < rayon + 20:
+				if time.time() - araignee[6] > 1:
+					pv_joueur -= 1
+					araignee[6] = time.time()
+			# Dégâts à l'araignée si contact et joueur a une arme
+			if dist < rayon + 20 and degats_joueur() > 0:
+				if time.time() - dernier_degats_araignee > 1:
+					araignee[5] -= degats_joueur()
+					dernier_degats_araignee = time.time()
+			# Mort de l'araignée
+			if araignee[5] <= 0:
+				araignees.remove(araignee)
+				inventaire['fil'] += 1  # loot fil
+				continue
+			# Déplacement
+			if dist < 100:
+				dx = x - araignee[0]
+				dy = y - araignee[1]
+				norm = max(1, (dx**2 + dy**2)**0.5)
+				araignee[0] += int(3 * dx / norm)
+				araignee[1] += int(3* dy / norm)
+			else:
+				if time.time() - araignee[4] > 5:
+					araignee[2], araignee[3] = random_direction()
+					araignee[4] = time.time()
+				araignee[0] += araignee[2] * 0.07
+				araignee[1] += araignee[3] * 0.07
+			araignee[0] = max(0, min(LARGEUR, araignee[0]))
+			araignee[1] = max(0, min(HAUTEUR, araignee[1]))
 		
 	# Gestion bucheronnage
 	indices_a_supprimer = []
@@ -245,6 +421,16 @@ while en_cours:
 	for oritem in ors:
 		xo, yo, _ = oritem
 		fenetre.blit(or_img, (xo - or_img.get_width()//2, yo - or_img.get_height()//2))
+	
+	# Dessin du portail
+	fenetre.blit(porte_img, (porte_x - porte_img.get_width()//2, porte_y - porte_img.get_height()//2))
+
+    # Dessin des monstres si monde animal
+	if monde == MONDE_ANIMALE:
+		for loup in loups:
+			fenetre.blit(loup_img, (loup[0] - loup_img.get_width()//2, loup[1] - loup_img.get_height()//2))
+		for araignee in araignees:
+			fenetre.blit(araignee_img, (araignee[0] - araignee_img.get_width()//2, araignee[1] - araignee_img.get_height()//2))
 
 	# Animation du personnage
 	frame_timer += 1
@@ -259,6 +445,69 @@ while en_cours:
 	texte_inv = font.render("Inv.", True, (0, 0, 0))
 	fenetre.blit(texte_inv, (rect_inventaire.x + 5, rect_inventaire.y + 15))
 
+	# --- Affichage des items consommables (viande) ---
+	# Affiche la viande si présente dans l'inventaire
+	if inventaire['viande'] > 0:
+		viande_rect = pygame.Rect(rect_inventaire.x + 10, rect_inventaire.y - 40, 40, 40)
+		pygame.draw.rect(fenetre, couleurs_ressources['viande'], viande_rect)
+		font_viande = pygame.font.Font(None, 22)
+		txt_viande = font_viande.render(f"Viande x{inventaire['viande']}", True, (0, 0, 0))
+		fenetre.blit(txt_viande, (viande_rect.x + 2, viande_rect.y + 10))
+
+	# Affiche le fil si présent dans l'inventaire
+	if inventaire['fil'] > 0:
+		fil_rect = pygame.Rect(rect_inventaire.x + 60, rect_inventaire.y - 40, 40, 40)
+		pygame.draw.rect(fenetre, couleurs_ressources['fil'], fil_rect)
+		font_fil = pygame.font.Font(None, 22)
+		txt_fil = font_fil.render(f"Fil x{inventaire['fil']}", True, (0, 0, 0))
+		fenetre.blit(txt_fil, (fil_rect.x + 2, fil_rect.y + 10))
+
+	# --- Affichage de la barre de PV du joueur ---
+	bar_x = rect_inventaire.x + rect_inventaire.width + 20
+	bar_y = rect_inventaire.y + 10
+	bar_largeur = 100
+	bar_hauteur = 20
+	pygame.draw.rect(fenetre, (180, 0, 0), (bar_x, bar_y, bar_largeur, bar_hauteur))  # fond rouge
+	pv_largeur = int(bar_largeur * pv_joueur / 100)
+	pygame.draw.rect(fenetre, (0, 200, 0), (bar_x, bar_y, pv_largeur, bar_hauteur))   # barre verte
+	font_pv = pygame.font.Font(None, 22)
+	txt_pv = font_pv.render(f"{pv_joueur}/100 PV", True, (0, 0, 0))
+	fenetre.blit(txt_pv, (bar_x + 10, bar_y + 2))
+
+	arc_case = pygame.Rect(bar_x + bar_largeur + 20, bar_y, 40, 40)
+	pygame.draw.rect(fenetre, (220, 220, 220), arc_case)
+	if arme_distance == 'arc' and inventaire['arc'] > 0:
+		pygame.draw.rect(fenetre, couleurs_ressources['arc'], arc_case)
+		font_arc = pygame.font.Font(None, 18)
+		fenetre.blit(font_arc.render('Arc', True, (0,0,0)), (arc_case.x+5, arc_case.y+10))
+	else:
+		font_arc = pygame.font.Font(None, 18)
+		fenetre.blit(font_arc.render('Arc', True, (100,100,100)), (arc_case.x+5, arc_case.y+10))
+
+	if arme_distance == 'arc' and inventaire['arc'] > 0:
+		if event.type == pygame.MOUSEMOTION:
+			trait_visee = True
+			pos_visee = event.pos
+		if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+			trait_visee = False
+		if event.type == pygame.KEYDOWN and event.key == pygame.K_c:
+			dx, dy = pos_visee[0] - x, pos_visee[1] - y
+			norm = max(1, (dx**2 + dy**2)**0.5)
+			direction_fleche = (dx/norm, dy/norm)
+			if inventaire['fleche_or'] > 0:
+				inventaire['fleche_or'] -= 1
+				# Ajoute ici la logique de déplacement de la flèche et collision si tu veux
+			elif inventaire['fleche_pierre'] > 0:
+				inventaire['fleche_pierre'] -= 1
+                # Idem pour la flèche en pierre
+	
+	# Affiche le trait de visée
+	if arme_distance == 'arc' and trait_visee:
+			pygame.draw.line(fenetre, (0,0,0), (x, y), pos_visee, 2)
+    # Affiche le nombre de flèches
+	font_fleche = pygame.font.Font(None, 16)
+	fenetre.blit(font_fleche.render(f"P:{inventaire['fleche_pierre']}", True, (80,80,80)), (arc_case.x, arc_case.y+35))
+	fenetre.blit(font_fleche.render(f"O:{inventaire['fleche_or']}", True, (200,180,0)), (arc_case.x+20, arc_case.y+35))
 	# Affichage du menu central si ouvert
 	if menu_ouvert:
 		pygame.draw.rect(fenetre, (220, 220, 220), rect_menu)
@@ -320,6 +569,9 @@ while en_cours:
 				recette_stick_pierre = [[None, 'pierre', None], [None, 'pierre', None], [None, 'pierre', None]]
 				recette_epee_pierre = [[None, 'pierre', None], [None, 'pierre', None], [None, 'stick', None]]
 				recette_epee_or = [[None, 'or', None], [None, 'or', None], [None, 'stick_pierre', None]]
+				recette_arc = [[None, 'stick', 'stick'], [None, 'fil', 'stick'], [None, 'stick', 'stick']]
+				recette_fleche_pierre = [[None, 'pierre', None], [None, 'stick', None], [None, 'stick', None]]
+				recette_fleche_or = [[None, 'or', None], [None, 'stick', None], [None, 'stick', None]]
 
 				if matrice_craft == recette_stick:
 					inventaire['stick'] += 1
@@ -339,7 +591,32 @@ while en_cours:
 				elif matrice_craft == recette_epee_or:
 					inventaire['epee_or'] += 1
 					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+				elif matrice_craft == recette_arc:
+					inventaire['arc'] += 1
+					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+				elif matrice_craft == recette_fleche_pierre:
+					inventaire['fleche_pierre'] += 4
+					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+				elif matrice_craft == recette_fleche_or:
+					inventaire['fleche_or'] += 4
+					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
 	pygame.display.flip()
 
+	# --- Gestion de la consommation de la viande (clic sur la viande dans l'inventaire) ---
+	mouse_pressed = pygame.mouse.get_pressed()
+	mouse_pos = pygame.mouse.get_pos()
+	if inventaire['viande'] > 0:
+		viande_rect = pygame.Rect(rect_inventaire.x + 10, rect_inventaire.y - 40, 40, 40)
+		if mouse_pressed[0] and viande_rect.collidepoint(mouse_pos):
+			if pv_joueur < 100:
+				inventaire['viande'] -= 1
+				pv_joueur = min(100, pv_joueur + 10)
+	
+	if inventaire['arc'] > 0:
+		arc_case = pygame.Rect(bar_x + bar_largeur + 20, bar_y, 40, 40)
+		if mouse_pressed[0] and arc_case.collidepoint(mouse_pos):
+			arme_distance = 'arc'
+
 pygame.quit()
+
 
