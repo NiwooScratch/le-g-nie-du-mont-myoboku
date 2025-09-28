@@ -58,9 +58,19 @@ BLANC = (255, 255, 255)
 ROUGE = (255, 0, 0)
 VERT = (0, 255, 0)
 
+
 arme_distance = None  # 'arc' si sélectionné, sinon None
 trait_visee = False
 pos_visee = (0, 0)
+tir_en_cours = False
+tir_rouge_timer = 0
+dernier_tir_ennemi = None
+degats_fleche = 0
+tir_touche = False
+game_over = False
+game_over_timer = 0
+bouclier_actif = False
+bouclier_leve = False
 
 # Position et rayon de la boule
 arbres = []
@@ -95,7 +105,8 @@ inventaire = {
 	'fil': 0 ,
 	'arc': 0,
 	'fleche_pierre': 0,
-    'fleche_or': 0
+    'fleche_or': 0 ,
+	'bouclier_bois': 0
 }
 couleurs_ressources = {
 	'bois': (139, 69, 19),
@@ -111,7 +122,8 @@ couleurs_ressources = {
 	'fil': (220, 220, 220),
 	'arc': (120, 80, 40),
     'fleche_pierre': (100, 100, 100),
-    'fleche_or': (255, 215, 0)
+    'fleche_or': (255, 215, 0),
+	'bouclier_bois': (150, 120, 60)
 }
 
 # variables de combat
@@ -157,6 +169,8 @@ def degats_joueur():
         return 1
     else:
         return 0
+	
+scroll_last_pressed = False
 
 # Boucle principale
 en_cours = True
@@ -164,21 +178,98 @@ while en_cours:
 	for event in pygame.event.get():
 		if event.type == pygame.QUIT:
 			en_cours = False
+
+		# Gestion de la visée à l'arc (affichage du trait)
+		if arme_distance == 'arc' and inventaire['arc'] > 0:
+			if event.type == pygame.MOUSEMOTION:
+				# Limite la visée à 300 pixels
+				mx, my = event.pos
+				dx, dy = mx - x, my - y
+				dist = (dx**2 + dy**2)**0.5
+				if dist > 300:
+					ratio = 300 / dist
+					mx = int(x + dx * ratio)
+					my = int(y + dy * ratio)
+				pos_visee = (mx, my)
+				trait_visee = True
+			if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+				trait_visee = False
+			# Tir à l'arc sur ESPACE
+			if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and not tir_en_cours:
+				# On ne tire que si on a des flèches
+				if inventaire['fleche_or'] > 0 or inventaire['fleche_pierre'] > 0:
+					dx, dy = pos_visee[0] - x, pos_visee[1] - y
+					dist = (dx**2 + dy**2)**0.5
+					if dist > 0:
+						vx, vy = dx / dist, dy / dist
+						# Cherche le premier ennemi sur la ligne de visée (tolérance 10px)
+						cible = None
+						cible_type = None
+						cible_idx = None
+						min_dist = 9999
+						# Loups
+						for idx, loup in enumerate(loups):
+							lx, ly = loup[0], loup[1]
+							proj = ((lx - x) * vx + (ly - y) * vy)
+							if 0 < proj < 300:
+								px, py = x + proj * vx, y + proj * vy
+								d = ((lx - px)**2 + (ly - py)**2)**0.5
+								if d < 15 and proj < min_dist:
+									cible = loup
+									cible_type = 'loup'
+									cible_idx = idx
+									min_dist = proj
+						# Araignées
+						for idx, araignee in enumerate(araignees):
+							ax, ay = araignee[0], araignee[1]
+							proj = ((ax - x) * vx + (ay - y) * vy)
+							if 0 < proj < 300:
+								px, py = x + proj * vx, y + proj * vy
+								d = ((ax - px)**2 + (ay - py)**2)**0.5
+								if d < 15 and proj < min_dist:
+									cible = araignee
+									cible_type = 'araignee'
+									cible_idx = idx
+									min_dist = proj
+						# Si cible trouvée, prépare le tir (ligne rouge)
+						if cible is not None:
+							tir_en_cours = True
+							tir_rouge_timer = time.time()
+							tir_touche = True
+							dernier_tir_ennemi = (cible_type, cible_idx)
+							if inventaire['fleche_or'] > 0:
+								degats_fleche = 10
+								inventaire['fleche_or'] -= 1
+							elif inventaire['fleche_pierre'] > 0:
+								degats_fleche = 5
+								inventaire['fleche_pierre'] -= 1
+						else:
+							# Tire sans toucher (ligne reste noire)
+							if inventaire['fleche_or'] > 0:
+								inventaire['fleche_or'] -= 1
+							elif inventaire['fleche_pierre'] > 0:
+								inventaire['fleche_pierre'] -= 1
+							tir_en_cours = True
+							tir_rouge_timer = time.time()
+							tir_touche = False
+							dernier_tir_ennemi = None
 		# Gestion du clic sur le carré inventaire
 		if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
 			mx, my = event.pos
 			if rect_inventaire.collidepoint(mx, my):
 				menu_ouvert = not menu_ouvert
-			# Drag depuis inventaire (menu ouvert)
+			# Drag depuis inventaire (menu ouvert, version scrollable)
 			if menu_ouvert:
 				font = pygame.font.Font(None, 28)
 				y_inv = rect_menu.y + 30
-				for res in inventaire:
-					rect_res = pygame.Rect(rect_menu.x + 20, y_inv, 28, 28)
+				ressources_affichees = list(inventaire.keys())
+				visible_ressources = ressources_affichees[scroll_offset:scroll_offset+nb_affichees]
+				for idx, res in enumerate(visible_ressources):
+					rect_res = pygame.Rect(rect_menu.x + 20, y_inv + idx*35, 28, 28)
 					if rect_res.collidepoint(mx, my) and inventaire[res] > 0:
 						ressource_drag = res
 						drag_offset = (mx - rect_res.x, my - rect_res.y)
-					y_inv += 35
+						break
 				# Drag depuis matrice de craft
 				case_size = 40
 				mat_x = rect_menu.x + 220
@@ -236,9 +327,11 @@ while en_cours:
 		direction = 'up'
 	elif touches[pygame.K_DOWN]:
 		y += vitesse
-
-
 		direction = 'down'
+
+	# Collision avec les bords de la map
+	x = max(rayon, min(LARGEUR - rayon, x))
+	y = max(rayon, min(HAUTEUR - rayon, y))
 	# gestion du portail (changement de monde)
 	if (x - porte_x)**2 + (y - porte_y)**2 < (rayon + 30)**2:
 		if monde == MONDE_INITIAL:
@@ -287,7 +380,10 @@ while en_cours:
 			# Dégâts au joueur
 			if dist < rayon + 20:
 				if time.time() - loup[6] > 1:
-					pv_joueur -= 3
+					degat = 3
+					if bouclier_actif and bouclier_leve:
+						degat = degat // 2
+					pv_joueur -= degat
 					loup[6] = time.time()
 			# Dégâts au loup si contact et joueur a une arme
 			if dist < rayon + 20 and degats_joueur() > 0:
@@ -322,7 +418,10 @@ while en_cours:
 			# Dégâts au joueur
 			if dist < rayon + 20:
 				if time.time() - araignee[6] > 1:
-					pv_joueur -= 1
+					degat = 1
+					if bouclier_actif and bouclier_leve:
+						degat = degat // 2
+					pv_joueur -= degat
 					araignee[6] = time.time()
 			# Dégâts à l'araignée si contact et joueur a une arme
 			if dist < rayon + 20 and degats_joueur() > 0:
@@ -446,21 +545,13 @@ while en_cours:
 	fenetre.blit(texte_inv, (rect_inventaire.x + 5, rect_inventaire.y + 15))
 
 	# --- Affichage des items consommables (viande) ---
-	# Affiche la viande si présente dans l'inventaire
+	# Affiche la viande si présente dans l'inventaire (consommable uniquement)
 	if inventaire['viande'] > 0:
 		viande_rect = pygame.Rect(rect_inventaire.x + 10, rect_inventaire.y - 40, 40, 40)
 		pygame.draw.rect(fenetre, couleurs_ressources['viande'], viande_rect)
 		font_viande = pygame.font.Font(None, 22)
 		txt_viande = font_viande.render(f"Viande x{inventaire['viande']}", True, (0, 0, 0))
 		fenetre.blit(txt_viande, (viande_rect.x + 2, viande_rect.y + 10))
-
-	# Affiche le fil si présent dans l'inventaire
-	if inventaire['fil'] > 0:
-		fil_rect = pygame.Rect(rect_inventaire.x + 60, rect_inventaire.y - 40, 40, 40)
-		pygame.draw.rect(fenetre, couleurs_ressources['fil'], fil_rect)
-		font_fil = pygame.font.Font(None, 22)
-		txt_fil = font_fil.render(f"Fil x{inventaire['fil']}", True, (0, 0, 0))
-		fenetre.blit(txt_fil, (fil_rect.x + 2, fil_rect.y + 10))
 
 	# --- Affichage de la barre de PV du joueur ---
 	bar_x = rect_inventaire.x + rect_inventaire.width + 20
@@ -474,6 +565,20 @@ while en_cours:
 	txt_pv = font_pv.render(f"{pv_joueur}/100 PV", True, (0, 0, 0))
 	fenetre.blit(txt_pv, (bar_x + 10, bar_y + 2))
 
+	# case bouclier
+	bouclier_case = pygame.Rect(bar_x + bar_largeur + 70, bar_y, 40, 40)
+	pygame.draw.rect(fenetre, (220, 220, 220), bouclier_case)
+	if inventaire['bouclier_bois'] > 0:
+		pygame.draw.rect(fenetre, couleurs_ressources['bouclier_bois'], bouclier_case)
+		font_bouclier = pygame.font.Font(None, 18)
+		fenetre.blit(font_bouclier.render('Bouclier', True, (0,0,0)), (bouclier_case.x+2, bouclier_case.y+10))
+		if bouclier_actif:
+			pygame.draw.rect(fenetre, (0,200,255), (bouclier_case.x, bouclier_case.y, 40, 5))
+	else:
+		font_bouclier = pygame.font.Font(None, 18)
+		fenetre.blit(font_bouclier.render('Bouclier', True, (100,100,100)), (bouclier_case.x+2, bouclier_case.y+10))
+
+	# gstion arc
 	arc_case = pygame.Rect(bar_x + bar_largeur + 20, bar_y, 40, 40)
 	pygame.draw.rect(fenetre, (220, 220, 220), arc_case)
 	if arme_distance == 'arc' and inventaire['arc'] > 0:
@@ -500,14 +605,78 @@ while en_cours:
 			elif inventaire['fleche_pierre'] > 0:
 				inventaire['fleche_pierre'] -= 1
                 # Idem pour la flèche en pierre
+
+		
 	
-	# Affiche le trait de visée
+	# Affiche le trait de visée (noir ou rouge si tir et touche)
+	couleur_trait = (0,0,0)
+	if tir_en_cours and tir_touche and time.time() - tir_rouge_timer < 1:
+		couleur_trait = (255,0,0)
 	if arme_distance == 'arc' and trait_visee:
-			pygame.draw.line(fenetre, (0,0,0), (x, y), pos_visee, 2)
-    # Affiche le nombre de flèches
+		# Limite la portée à 300px
+		dx, dy = pos_visee[0] - x, pos_visee[1] - y
+		dist = (dx**2 + dy**2)**0.5
+		if dist > 300:
+			ratio = 300 / dist
+			px = int(x + dx * ratio)
+			py = int(y + dy * ratio)
+			pygame.draw.line(fenetre, couleur_trait, (x, y), (px, py), 2)
+		else:
+			pygame.draw.line(fenetre, couleur_trait, (x, y), pos_visee, 2)
+	# Affiche le nombre de flèches
 	font_fleche = pygame.font.Font(None, 16)
 	fenetre.blit(font_fleche.render(f"P:{inventaire['fleche_pierre']}", True, (80,80,80)), (arc_case.x, arc_case.y+35))
 	fenetre.blit(font_fleche.render(f"O:{inventaire['fleche_or']}", True, (200,180,0)), (arc_case.x+20, arc_case.y+35))
+
+	# Applique les dégâts à l'ennemi touché après 1s
+	if tir_en_cours and time.time() - tir_rouge_timer >= 1:
+		if tir_touche and dernier_tir_ennemi is not None:
+			cible_type, cible_idx = dernier_tir_ennemi
+			if cible_type == 'loup' and 0 <= cible_idx < len(loups):
+				loups[cible_idx][5] -= degats_fleche
+			elif cible_type == 'araignee' and 0 <= cible_idx < len(araignees):
+				araignees[cible_idx][5] -= degats_fleche
+		tir_en_cours = False
+		dernier_tir_ennemi = None
+		degats_fleche = 0
+		tir_touche = False
+
+	# Gestion Game Over
+	if not game_over and pv_joueur <= 0:
+		game_over = True
+		game_over_timer = time.time()
+
+	if game_over:
+		# Affiche Game Over
+		font_go = pygame.font.Font(None, 80)
+		txt_go = font_go.render("GAME OVER", True, (200,0,0))
+		fenetre.blit(txt_go, (LARGEUR//2 - txt_go.get_width()//2, HAUTEUR//2 - txt_go.get_height()//2))
+		pygame.display.flip()
+		if time.time() - game_over_timer > 5:
+			# Reset complet
+			pv_joueur = 100
+			x, y = LARGEUR // 2, HAUTEUR // 2
+			for k in inventaire:
+				inventaire[k] = 0
+			matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+			loups.clear()
+			araignees.clear()
+			arbres.clear()
+			pierres.clear()
+			ors.clear()
+			reset_map(MONDE_INITIAL)
+			monde = MONDE_INITIAL
+			menu_ouvert = False
+			ressource_drag = None
+			trait_visee = False
+			tir_en_cours = False
+			tir_touche = False
+			dernier_tir_ennemi = None
+			degats_fleche = 0
+			game_over = False
+		continue
+
+	mouse_pressed = pygame.mouse.get_pressed()
 	# Affichage du menu central si ouvert
 	if menu_ouvert:
 		pygame.draw.rect(fenetre, (220, 220, 220), rect_menu)
@@ -516,20 +685,60 @@ while en_cours:
 		font = pygame.font.Font(None, 28)
 		y_inv = rect_menu.y + 30
 		ressources_affichees = list(inventaire.keys())
-		# Flèches haut/bas
-		rect_up = pygame.Rect(rect_menu.x + 20, y_inv - 25, 28, 20)
-		rect_down = pygame.Rect(rect_menu.x + 20, y_inv + nb_affichees*35, 28, 20)
-		pygame.draw.rect(fenetre, (180,180,180), rect_up)
-		pygame.draw.rect(fenetre, (180,180,180), rect_down)
-		font_scroll = pygame.font.Font(None, 20)
-		fenetre.blit(font_scroll.render('▲', True, (0,0,0)), (rect_up.x+7, rect_up.y))
-		fenetre.blit(font_scroll.render('▼', True, (0,0,0)), (rect_down.x+7, rect_down.y))
+		# Slider graphique pour le scroll
+		slider_x = rect_menu.x + 10 + 28 + 10
+		slider_y = y_inv - 5
+		slider_height = nb_affichees * 35
+		slider_width = 10
+		pygame.draw.rect(fenetre, (200,200,200), (slider_x, slider_y, slider_width, slider_height))
+		# Taille du curseur
+		total_items = len(ressources_affichees)
+		if total_items > nb_affichees:
+			curseur_height = max(30, int(slider_height * nb_affichees / total_items))
+			max_offset = total_items - nb_affichees
+			curseur_y = slider_y + int(slider_height * scroll_offset / total_items)
+			curseur_rect = pygame.Rect(slider_x, curseur_y, slider_width, curseur_height)
+			pygame.draw.rect(fenetre, (100,100,100), curseur_rect)
+		else:
+			curseur_height = slider_height
+			curseur_rect = pygame.Rect(slider_x, slider_y, slider_width, curseur_height)
+			pygame.draw.rect(fenetre, (100,100,100), curseur_rect)
+
 		# Affichage ressources scrollées
 		for idx, res in enumerate(ressources_affichees[scroll_offset:scroll_offset+nb_affichees]):
 			rect_res = pygame.Rect(rect_menu.x + 20, y_inv + idx*35, 28, 28)
 			pygame.draw.rect(fenetre, couleurs_ressources.get(res, (100, 100, 100)), rect_res)
 			txt = font.render(f"{res} : {inventaire[res]}", True, (0, 0, 0))
 			fenetre.blit(txt, (rect_menu.x + 55, y_inv + idx*35))
+
+		# Gestion du slider (drag & click)
+		mouse_pressed = pygame.mouse.get_pressed()
+		mouse_pos = pygame.mouse.get_pos()
+		if 'slider_drag' not in globals():
+			slider_drag = False
+			slider_drag_offset = 0
+		if event.type == pygame.MOUSEBUTTONDOWN and mouse_pressed[0]:
+			if curseur_rect.collidepoint(mouse_pos):
+				slider_drag = True
+				slider_drag_offset = mouse_pos[1] - curseur_rect.y
+			elif (slider_x <= mouse_pos[0] <= slider_x+slider_width) and (slider_y <= mouse_pos[1] <= slider_y+slider_height):
+				# Clique sur la barre, saute à la position
+				rel_y = mouse_pos[1] - slider_y
+				percent = rel_y / slider_height
+				scroll_offset = int(percent * (total_items - nb_affichees))
+				scroll_offset = max(0, min(scroll_offset, total_items - nb_affichees))
+		if event.type == pygame.MOUSEBUTTONUP:
+			slider_drag = False
+		if slider_drag and mouse_pressed[0]:
+			rel_y = mouse_pos[1] - slider_y - slider_drag_offset + curseur_height//2
+			percent = rel_y / slider_height
+			scroll_offset = int(percent * (total_items - nb_affichees))
+			scroll_offset = max(0, min(scroll_offset, total_items - nb_affichees))
+
+		# Drag visuel (corrigé pour ne pas buguer avec le scroll)
+		if ressource_drag:
+			mx, my = pygame.mouse.get_pos()
+			pygame.draw.rect(fenetre, couleurs_ressources.get(ressource_drag, (100, 100, 100)), (mx - drag_offset[0], my - drag_offset[1], 28, 28))
 		# Matrice 3x3 à droite
 		case_size = 40
 		mat_x = rect_menu.x + 220
@@ -550,10 +759,6 @@ while en_cours:
 		fenetre.blit(txt_bouton, (bouton_rect.x + 30, bouton_rect.y + 5))
 
 		
-		if rect_up.collidepoint(mx, my) and scroll_offset > 0:
-			scroll_offset -= 1
-		if rect_down.collidepoint(mx, my) and scroll_offset < len(ressources_affichees) - nb_affichees:
-			scroll_offset += 1
 
 		# Drag visuel
 		if ressource_drag:
@@ -572,6 +777,7 @@ while en_cours:
 				recette_arc = [[None, 'stick', 'stick'], [None, 'fil', 'stick'], [None, 'stick', 'stick']]
 				recette_fleche_pierre = [[None, 'pierre', None], [None, 'stick', None], [None, 'stick', None]]
 				recette_fleche_or = [[None, 'or', None], [None, 'stick', None], [None, 'stick', None]]
+				recette_bouclier_bois = [['pierre','bois','pierre'],['bois','pierre','bois'],['pierre','bois','pierre']]
 
 				if matrice_craft == recette_stick:
 					inventaire['stick'] += 1
@@ -600,6 +806,9 @@ while en_cours:
 				elif matrice_craft == recette_fleche_or:
 					inventaire['fleche_or'] += 4
 					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
+				elif matrice_craft == recette_bouclier_bois:
+					inventaire['bouclier_bois'] += 1
+					matrice_craft = [[None for _ in range(3)] for _ in range(3)]
 	pygame.display.flip()
 
 	# --- Gestion de la consommation de la viande (clic sur la viande dans l'inventaire) ---
@@ -616,5 +825,10 @@ while en_cours:
 		arc_case = pygame.Rect(bar_x + bar_largeur + 20, bar_y, 40, 40)
 		if mouse_pressed[0] and arc_case.collidepoint(mouse_pos):
 			arme_distance = 'arc'
+		
+	if inventaire['bouclier_bois'] > 0:
+		bouclier_case = pygame.Rect(bar_x + bar_largeur + 70, bar_y, 40, 40)
+	if mouse_pressed[0] and bouclier_case.collidepoint(mouse_pos):
+		bouclier_actif = True
 
 pygame.quit()
